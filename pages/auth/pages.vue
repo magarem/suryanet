@@ -1,0 +1,345 @@
+<template>
+    <div>
+        <div class="card m-4">
+            <CustomDataTable
+                title="Páginas"
+                :items="items"
+                :filters="filters"
+                :visibleColumns="visibleColumns"
+                v-model:selectedItems="selectedItems"
+                :formatCurrency="formatCurrency"
+                :formatDateBR="formatDateBR"
+                :editItem="editItem"
+                :openNew="openNew"
+                @deleteItem="deleteItem"
+                @deleteSelectedItems="deleteSelectedItems"
+            />
+        </div>
+
+        <GenericCreateEditForm :show="itemDialog" :item="item" :columns="columns" :submitted="submitted" @close="hideDialog" @save="saveItem" />
+    </div>
+</template>
+
+<script setup>
+    // definePageMeta({
+    //   middleware: ["authenticated"]
+    // });
+    import { ref, onMounted, computed } from 'vue';
+    import { useToast } from 'primevue/usetoast';
+    import { FilterMatchMode } from '@primevue/core/api';
+    import InputText from 'primevue/inputtext';
+    import { executeQuery, executeQueryRun } from '~/utils/db'; // Adjust the import path as necessary
+    const { user, clear: clearSession } = useUserSession();
+    import CustomCheckbox from '~/components/CustomCheckbox.vue';
+
+    const toast = useToast();
+    const dt = ref();
+    const items = ref([]);
+    const itemDialog = ref(false);
+    const deleteItemDialog = ref(false);
+    const deleteItemsDialog = ref(false);
+    const item = ref({});
+    const selectedItems = ref([]);
+    const filters = ref({
+        global: { value: null, matchMode: FilterMatchMode.CONTAINS },
+    });
+    const submitted = ref(false);
+    const route = useRoute();
+    const data_roles = ref([]);
+
+    const visibleColumns = computed(() => {
+        return columns.value.filter((col) => !col.hidden);
+    });
+
+    const columns = ref([]);
+
+    onMounted(async () => {
+        await fetchData();
+    });
+
+    function formatValue(value) {
+        if (typeof value == 'object') {
+            return value.join(', ');
+        }
+        return value;
+    }
+
+    async function fetchData() {
+        const dataRoles = await executeQuery('SELECT id, name FROM roles');
+        data_roles.value = dataRoles?.map((x) => ({ key: x.id, value: x.name }));
+        console.log('Fetched dataRoles----+:', data_roles.value);
+
+        const data = await executeQuery(
+            `SELECT
+        p.id,
+        p.page,
+        GROUP_CONCAT(r.name, ', ') AS roles_names,
+        GROUP_CONCAT(pr.role_id, ', ') AS roles_ids
+    FROM
+        pages p
+    LEFT JOIN
+        page_roles pr ON p.id = pr.page_id
+    LEFT JOIN
+        roles r ON pr.role_id = r.id
+    GROUP BY
+        p.page;
+    `,
+        );
+
+        console.log('Fetched data:', data);
+        // items.value = data;
+
+        items.value = data.map((page) => {
+            return {
+                ...page,
+                roles_ids: page.roles_ids ? page.roles_ids.split(',').map((id) => Number(id.trim())) : [],
+                roles_names: page.roles_names ? page.roles_names.split(',').map((name) => name.trim()) : [],
+            };
+        });
+
+        columns.value = [
+            {
+                field: 'id',
+                header: 'ID',
+                sortable: true,
+                style: { 'min-width': '8rem', 'background-color': '#111829' },
+                // hidden: true
+            }, // Ocultar o ID na edição
+            {
+                field: 'page',
+                header: 'Página',
+                sortable: true,
+                style: { 'min-width': '16rem', 'background-color': '#111829' },
+                editTemplate: InputText,
+            },
+            {
+                field: 'roles_names', // Coluna para exibição na tabela
+                header: 'Roles',
+                sortable: true,
+                style: { 'min-width': '12rem', 'background-color': '#111829' },
+                bodyTemplate: (slotProps) => slotProps.data.roles_names, // Exibe os nomes concatenados
+                editTemplate: null, // Não usar este campo para editar
+            },
+            {
+                field: 'roles_ids', // Coluna para edição
+                header: 'Roles', // Pode manter o mesmo header ou mudar para "Selecionar Roles"
+                sortable: true,
+                style: { 'min-width': '12rem', 'background-color': '#111829' },
+                editTemplate: CustomCheckbox, // Usar o CustomCheckbox para editar
+                options: data_roles.value, // Passar as opções para o CustomCheckbox
+                hidden: true, // Ocultar esta coluna na tabela (opcional, pode remover se não quiser)
+            },
+        ];
+    }
+
+    function openNew() {
+        item.value = {};
+        submitted.value = false;
+        itemDialog.value = true;
+    }
+
+    function hideDialog() {
+        itemDialog.value = false;
+        submitted.value = false;
+    }
+
+    async function saveItem(itemToSave) {
+        item.value = itemToSave;
+        submitted.value = true;
+
+        let isValid = true;
+        for (const col of columns.value) {
+            if (col.editTemplate && !item.value[col.field] && col.field !== 'roles_names') {
+                isValid = false;
+                break;
+            }
+        }
+
+        if (isValid) {
+            try {
+                const pageData = {
+                    page: item.value.page,
+                };
+
+                // 1. Salvar/atualizar a página na tabela 'pages'
+                let pageResponse;
+                try {
+                    pageResponse = await $fetch(`/api/upsert`, {
+                        method: 'POST',
+                        body: {
+                            table: 'pages',
+                            data: pageData,
+                            condition: item.value.id ? `id = ${item.value.id}` : null,
+                        },
+                    });
+                    console.log('pageResponse?.result?.lastInsertRowid:', pageResponse?.result.lastInsertRowid);
+                } catch (error) {
+                    console.error('Erro ao salvar/atualizar página:', error);
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Erro',
+                        detail: `Erro ao salvar/atualizar página: ${error.message}`,
+                        life: 5000,
+                    });
+                    return; // Pare a execução em caso de erro na chamada à API
+                }
+
+                let pageId;
+                if (item.value.id) {
+                    pageId = item.value.id;
+                    if (!pageResponse?.message && pageResponse !== null) {
+                        toast.add({
+                            severity: 'error',
+                            summary: 'Error',
+                            detail: 'Falha ao atualizar a página.',
+                            life: 3000,
+                        });
+                        return;
+                    }
+                } else if (pageResponse?.result?.lastInsertRowid) {
+                    pageId = pageResponse.result?.lastInsertRowid;
+                    pageData.id = pageId;
+                } else {
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Error',
+                        detail: 'Falha ao criar nova página.',
+                        life: 3000,
+                    });
+                    return;
+                }
+
+                const selectedRoleIds = item.value.roles_ids || [];
+
+                // 2. Atualizar a tabela 'page_roles'
+                if (pageId) {
+                    // Remover roles existentes para a página
+                    try {
+                        await executeQueryRun('DELETE FROM page_roles WHERE page_id = ' + pageId);
+                    } catch (error) {
+                        console.error('Erro ao deletar roles:', error);
+                        toast.add({
+                            severity: 'error',
+                            summary: 'Erro',
+                            detail: `Erro ao deletar roles: ${error.message}`,
+                            life: 5000,
+                        });
+                        return;
+                    }
+
+                    // Inserir os novos roles selecionados
+                    if (selectedRoleIds.length > 0) {
+                        const insertPromises = selectedRoleIds.map((roleId) => {
+                            try {
+                                return executeQueryRun('INSERT INTO page_roles (page_id, role_id) VALUES (' + pageId + ', ' + roleId + ')');
+                            } catch (error) {
+                                console.error('Erro ao inserir role:', error);
+                                toast.add({
+                                    severity: 'error',
+                                    summary: 'Erro',
+                                    detail: `Erro ao inserir role: ${error.message}`,
+                                    life: 5000,
+                                });
+                                return Promise.reject(error); // Rejeite a promessa para parar o Promise.all
+                            }
+                        });
+                        try {
+                            await Promise.all(insertPromises);
+                        } catch (error) {
+                            console.error('Erro em Promise.all:', error);
+                            return;
+                        }
+                    }
+                }
+
+                toast.add({
+                    severity: 'success',
+                    summary: 'Sucesso',
+                    detail: 'Página Salva',
+                    life: 3000,
+                });
+
+                itemDialog.value = false;
+                item.value = {};
+
+                await fetchData();
+            } catch (error) {
+                console.error('Erro ao salvar a página:', error);
+                toast.add({
+                    severity: 'error',
+                    summary: 'Error',
+                    detail: 'Erro ao salvar a página.',
+                    life: 3000,
+                });
+            }
+        }
+    }
+
+    function editItem(selectedItem) {
+        item.value = { ...selectedItem };
+        itemDialog.value = true;
+    }
+
+    function confirmDeleteItem(selectedItem) {
+        item.value = selectedItem;
+        deleteItemDialog.value = true;
+    }
+
+    async function deleteItem(item) {
+        await executeQueryRun(`DELETE FROM pages WHERE id = ${item.id}`);
+        await fetchData();
+        deleteItemDialog.value = false;
+        item.value = {};
+        toast.add({ severity: 'success', summary: 'Removido', life: 3000 });
+    }
+
+    function findIndexById(id) {
+        return items.value.findIndex((val) => val.id === id);
+    }
+
+    function createId() {
+        let id = '';
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        for (let i = 0; i < 5; i++) {
+            id += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return id;
+    }
+
+    function exportCSV() {
+        dt.value.exportCSV();
+    }
+
+    function confirmDeleteSelected() {
+        deleteItemsDialog.value = true;
+    }
+
+    async function deleteSelectedItems() {
+        items.value = items.value.filter((val) => !selectedItems.value.includes(val));
+        deleteItemsDialog.value = false;
+
+        const response = await $fetch(`/api/delete`, {
+            method: 'POST',
+            body: {
+                table: 'pages', // Substitua pelo nome da sua tabela
+                condition: `id in (${selectedItems.value.map((item) => item.id).join(',')})`,
+            },
+        });
+        selectedItems.value = null;
+        toast.add({
+            severity: 'success',
+            summary: 'Successful',
+            detail: 'Items Deleted',
+            life: 3000,
+        });
+    }
+
+    function formatCurrency(value) {
+        if (value)
+            return value.toLocaleString('en-US', {
+                style: 'currency',
+                currency: 'USD',
+            });
+        return;
+    }
+</script>

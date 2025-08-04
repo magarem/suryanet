@@ -1,0 +1,480 @@
+<template>
+  <!-- <div class="container mx-auto"> -->
+    <div class="card w-full p-4">
+      <CustomDataTable
+        title="Usuários"
+        :items="items"
+        :filters="filters"
+        :visibleColumns="visibleColumns"
+        v-model:selectedItems="selectedItems"
+        :formatCurrency="formatCurrency"
+        :formatDateBR="formatDateBR"
+        :editItem="editItem"
+        :openNew="openNew"
+        @deleteItem="deleteItem"
+        @deleteSelectedItems="deleteSelectedItems"
+      />
+    </div>
+
+     <GenericCreateEditForm
+      :show="itemDialog"
+      :item="item"
+      :columns="columns"
+      :submitted="submitted"
+      @close="hideDialog"
+      @save="saveItem"
+    />
+
+    <!-- <Dialog
+      v-model:visible="itemDialog"
+      :style="{ width: '450px' }"
+      header="Item Details"
+      :modal="true"
+    >
+      <div class="flex flex-col gap-6">
+        <template v-for="col in columns" :key="col.field">
+          <div v-if="col.editTemplate">
+            <label :for="col.field" class="block font-bold mb-3">{{
+              col.header
+            }}</label>
+            
+            <component
+              :is="col.editTemplate"
+              v-model="item[col.field]"
+              :item="item"
+              :options="col.options"
+              :submitted="submitted"
+              :field="col.field"
+            />
+            <small v-if="submitted && !item[col.field]" class="text-red-500"
+              >{{ col.header }} is required.</small
+            >
+          </div>
+        </template>
+      </div>
+
+      <template #footer>
+        <Button label="Cancel" icon="pi pi-times" text @click="hideDialog" />
+        <Button label="Save" icon="pi pi-check" @click="saveItem" />
+      </template>
+    </Dialog> -->
+
+
+  <!-- </div> -->
+</template>
+
+<script setup>
+definePageMeta({
+  middleware: ['authenticated'],
+})
+import { ref, onMounted } from "vue";
+import { useToast } from "primevue/usetoast";
+import { FilterMatchMode } from "@primevue/core/api";
+import InputText from "primevue/inputtext";
+import CustomCheckbox from "~/components/CustomCheckbox.vue";
+const { user, clear: clearSession } = useUserSession()
+
+const toast = useToast();
+const dt = ref();
+const items = ref([]);
+const itemDialog = ref(false);
+const deleteItemDialog = ref(false);
+const deleteItemsDialog = ref(false);
+const item = ref({});
+const selectedItems = ref([]);
+const filters = ref({
+  global: { value: null, matchMode: FilterMatchMode.CONTAINS }
+});
+const submitted = ref(false);
+const route = useRoute();
+const domain = user.domain;
+
+
+let data_roles = ref([]);
+const dataRoles = await executeQuery("SELECT id, name FROM roles");
+data_roles.value = dataRoles?.map(x => ({key: x.id, value: x.name}));
+console.log("Fetched dataRoles----+:", data_roles.value);
+
+
+// Crie o objeto de estilo Pass Through (PT)
+const myTableStyles = {
+    header: { class: 'bg-gray-800 text-gray-100 p-4 border-b border-gray-700' },
+    table: { class: 'w-full' },
+    thead: { class: 'bg-gray-800' },
+    tbody: { class: 'bg-gray-900' },
+    row: ({ props }) => ({
+        class: [
+            props.frozenRow ? 'bg-gray-900' : 'text-gray-200 hover:bg-gray-800/50', // Efeito hover nas linhas
+            { 'bg-blue-900/50 text-blue-200': props.selected } // Estilo para linha selecionada
+        ]
+    }),
+    column: {
+        headercell: { class: 'text-left p-4 font-bold border-b border-gray-700' },
+        bodycell: { class: 'p-4 border-b border-gray-700' }
+    },
+    paginator: {
+        root: { class: 'bg-gray-800 text-gray-200 flex items-center justify-center flex-wrap p-4 border-t border-gray-700' },
+        // Você pode customizar os botões, dropdown, etc., aqui se precisar
+        pagebutton: ({ props }) => ({
+            class: [
+                'rounded-full w-10 h-10 mx-1 transition-colors duration-200',
+                { 'bg-blue-500 text-white': props.active } // Botão da página ativa
+            ]
+        })
+    }
+};
+
+
+const visibleColumns = computed(() => {
+  return columns.value.filter(col => !col.hidden);
+});
+
+const columns = ref([
+  {
+    field: "username",
+    header: "Username",
+    sortable: true,
+    style: { "min-width": "7rem", "background-color": "#111829" },
+    editTemplate: InputText
+  },
+   {
+    field: "name",
+    header: "Nome",
+    sortable: true,
+    style: { "min-width": "7rem" , "background-color": "#111829"},
+    editTemplate: InputText
+  },
+  {
+    field: "email",
+    header: "Email",
+    sortable: true,
+    style: { "min-width": "7rem" , "background-color": "#111829"},
+    editTemplate: InputText
+  },
+  {
+    field: "phone",
+    header: "Telefone",
+    sortable: true,
+    style: { "min-width": "7rem", "background-color": "#111829" },
+    editTemplate: InputText
+  },
+  {
+    field: "password",
+    header: "Senha",
+    sortable: true,
+    style: { "min-width": "5rem", "background-color": "#111829" },
+    editTemplate: InputText,
+    hidden: true
+  },
+  {
+    field: "roles_names", // Coluna para exibição na tabela
+    header: "Roles",
+    sortable: true,
+    style: { "min-width": "5rem", "background-color": "#111829" },
+    bodyTemplate: (slotProps) => slotProps.data.roles_names, // Exibe os nomes concatenados
+    editTemplate: null, // Não usar este campo para editar
+    hidden: true,
+  },
+  {
+    field: "roles_ids", // Coluna para edição
+    header: "Roles", // Pode manter o mesmo header ou mudar para "Selecionar Roles"
+    sortable: true,
+    style: { "min-width": "10rem", "background-color": "#111829" },
+    editTemplate: CustomCheckbox, // Usar o CustomCheckbox para editar
+    options: data_roles.value, // Passar as opções para o CustomCheckbox
+    hidden: true, // Ocultar esta coluna na tabela (opcional, pode remover se não quiser)
+  },
+  {
+    field: "status",
+    header: "Status",
+    sortable: true,
+    style: { "min-width": "2rem", "background-color": "#111829" },
+    editTemplate: InputText
+  }
+]);
+
+onMounted(async () => {
+  const data = await fetchData();
+  items.value = data;
+});
+
+
+function formatValue(value) {
+  if (typeof value == 'object') {
+    return value.join(', '); // Format as JSON string
+  }
+  return value 
+}
+
+async function executeQuery(sql) {
+  // Added domain
+  try {
+    const response = await fetch(`/api/query`, {
+      // Changed URL
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ sql })
+    });
+    // Handle errors like before
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Handle error
+  }
+}
+
+async function executeQueryRun(sql) {
+  // Added domain
+  try {
+    const response = await fetch(`/api/queryRun`, {
+      // Changed URL
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ sql })
+    });
+    // Handle errors like before
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Handle error
+  }
+}
+
+async function fetchData() {
+  // const route = useRoute();
+  // const domain = route.params.domain;
+  
+  console.log("Fetched dataRoles:", dataRoles.map(x=> x.name));
+  // data_roles.value = dataRoles.name;
+  // console.log("Fetched data_roles:", data_roles);
+
+  const data = await executeQuery( `
+  SELECT
+      u.id,
+      u.username,
+      u.name,
+      u.email,
+      u.phone,
+      u.password,
+      u.status,
+      GROUP_CONCAT(r.name, ', ') AS roles_names,
+      GROUP_CONCAT(ur.role_id) AS roles_ids
+    FROM users u
+    LEFT JOIN user_roles ur ON u.id = ur.user_id
+    LEFT JOIN roles r ON ur.role_id = r.id
+    GROUP BY u.id, u.username, u.email, u.phone, u.password, u.status
+  `);
+
+  console.log("Fetched data:", data);
+
+  return data;
+}
+
+function openNew() {
+  item.value = {};
+  submitted.value = false;
+  itemDialog.value = true;
+}
+
+function hideDialog() {
+  itemDialog.value = false;
+  submitted.value = false;
+}
+
+async function saveItem(itemToSave) {
+  item.value = itemToSave;
+  submitted.value = true;
+
+  let isValid = true;
+  for (const col of columns.value) {
+    if (col.editTemplate && !item.value[col.field] && col.field !== 'roles') {
+      isValid = false;
+      break;
+    }
+  }
+
+  if (isValid) {
+    try {
+      const userData = {
+        id: item.value.id,
+        name: item.value.name,
+        username: item.value.username,
+        email: item.value.email,
+        phone: item.value.phone,
+        password: item.value.password,
+        status: item.value.status,
+      };
+
+      // 1. Salvar/atualizar os dados básicos do usuário na tabela 'users'
+      const userResponse = await $fetch(`/api/upsert`, {
+        method: "POST",
+        body: {
+          table: "users",
+          data: userData,
+          condition: item.value.id ? `id = ${item.value.id}` : null,
+        },
+      });
+
+      let userId;
+      if (item.value.id) {
+        userId = item.value.id;
+        if (!userResponse?.message && userResponse !== null) {
+          toast.add({
+            severity: "error",
+            summary: "Error",
+            detail: "Failed to update user data",
+            life: 3000,
+          });
+          return;
+        }
+      } else {
+        if (userResponse?.result?.lastInsertRowid) {
+          userId = userResponse?.result?.lastInsertRowid;
+          userData.id = userId; // Adicionar o ID ao userData para inserção
+        } else {
+          toast.add({
+            severity: "error",
+            summary: "Error",
+            detail: "Failed to create new user",
+            life: 3000,
+          });
+          return;
+        }
+      }
+
+      const selectedRoleIds = item.value.roles_ids || [];
+
+      // 2. Atualizar a tabela 'user_roles'
+      if (userId) {
+        await executeQueryRun(`DELETE FROM user_roles WHERE user_id = ${userId}`);
+
+        if (selectedRoleIds.length > 0) {
+          const insertPromises = selectedRoleIds.map((roleId) =>
+            executeQueryRun(`INSERT INTO user_roles (user_id, role_id) VALUES (${userId}, ${roleId})`)
+          );
+          await Promise.all(insertPromises);
+        }
+      }
+
+      toast.add({
+        severity: "success",
+        summary: "Successful",
+        detail: "Item Saved",
+        life: 3000,
+      });
+
+      itemDialog.value = false;
+      item.value = {};
+
+      // 3. Atualizar a lista localmente
+      if (item.value.id) {
+        // Atualizar registro existente
+        const index = items.value.findIndex((val) => val.id === item.value.id);
+        if (index !== -1) {
+          items.value[index] = { ...userData, roles_ids: selectedRoleIds, roles_names: item.value.roles_names }; // Use userData para atualizar
+        }
+      } else {
+        // Adicionar novo registro
+        items.value.push({ ...userData, roles_ids: selectedRoleIds, roles_names: item.value.roles_names }); // Use userData para inserir
+      }
+
+      const data = await fetchData();
+      items.value = data; // Recarregar os dados para exibir as alterações
+    } catch (error) {
+      console.error("Error saving item:", error);
+      toast.add({
+        severity: "error",
+        summary: "Error",
+        detail: "An error occurred while saving the item.",
+        life: 3000,
+      });
+    }
+  }
+}
+function editItem(selectedItem) {
+  item.value = { ...selectedItem };
+  // Certifique-se de que roles_ids esteja presente, mesmo que seja um array vazio
+  if (!item.value.roles_ids) {
+    item.value.roles_ids = [];
+  } else {
+    // Se roles_ids for uma string, converta para array (se necessário)
+    if (typeof item.value.roles_ids === 'string') {
+      item.value.roles_ids = item.value.roles_ids.split(',').map(Number); // Converter string para array de números
+    }
+  }
+  itemDialog.value = true;
+}
+
+function confirmDeleteItem(selectedItem) {
+  item.value = selectedItem;
+  deleteItemDialog.value = true;
+}
+
+async function deleteItem(item) {
+  await executeQueryRun(
+    `DELETE FROM users WHERE id = ${item.id}`
+  );
+  const data = await fetchData();
+  items.value = data;
+  deleteItemDialog.value = false;
+  item.value = {};
+  toast.add({ severity: "success", summary: "Removido", life: 3000 });
+}
+
+function findIndexById(id) {
+  return items.value.findIndex(val => val.id === id);
+}
+
+function createId() {
+  // Replace with your actual ID generation logic (e.g., UUID)
+  let id = "";
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < 5; i++) {
+    id += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return id;
+}
+
+function exportCSV() {
+  dt.value.exportCSV();
+}
+
+function confirmDeleteSelected() {
+  deleteItemsDialog.value = true;
+}
+
+async function deleteSelectedItems() {
+  items.value = items.value.filter(val => !selectedItems.value.includes(val));
+  deleteItemsDialog.value = false;
+
+  const response = await $fetch(`/api/delete`, {
+    method: "POST",
+    body: {
+      table: "users", // Substitua pelo nome da sua tabela
+      condition: `id in (${selectedItems.value.map(item => item.id).join(',')})`
+    }
+  });
+  selectedItems.value = null;
+  toast.add({
+    severity: "success",
+    summary: "Successful",
+    detail: "Items Deleted",
+    life: 3000
+  });
+}
+
+function formatCurrency(value) {
+  if (value)
+    return value.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD"
+    });
+  return;
+}
+
+</script>
