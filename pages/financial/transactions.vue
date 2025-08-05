@@ -1,5 +1,5 @@
 <template>
-    <div class="p-5">
+    <div class="">
         <div class="card w-full">
             <CustomDataTable
                 title="Lançamentos"
@@ -93,7 +93,7 @@
                             placeholder="Selecione"
                             checkmark
                             :highlightOnSelect="false"
-                            class="md:w-40 w-full"
+                            class="w-full"
                         />
                     </div>
 
@@ -243,7 +243,7 @@
             field: 'date',
             header: 'Data',
             sortable: true,
-            style: { 'min-width': '8rem', 'background-color': '#111829' },
+            style: { 'min-width': '10rem', 'background-color': '#111829' },
             editTemplate: 'calendar',
         },
         {
