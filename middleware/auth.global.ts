@@ -7,15 +7,22 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
         return;
     }
 
+   
     console.log(`Checking access for ${to.path} from ${from.path}`);
 
     const { user } = useUserSession();
+    //  if (import.meta.client) {
+    // alert(to.path);
+    // alert(user.value ? JSON.stringify(user.value) : 'not logged in');
+    // }
+
+
     console.log(`User session: ${user.value ? JSON.stringify(user.value) : 'not logged in'}`);
 
 // If the page is protected but the user is not logged in, redirect them to the login page.
-    // if (!user.value) {
-    //     return navigateTo('/login');
-    // }
+    if (to.path !== '/login' && !user.value) {
+        return navigateTo('/login');
+    }
     // --- 1. Fetch Required Roles for the Destination Page ---
     // We use `useFetch` which works on both client and server.
     // It calls a dedicated API endpoint to get the required roles from the database.
@@ -26,8 +33,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
         key: `page-roles-${to.path}`
     });
 
-    console.log(`Required roles for ${to.path}:`, requiredRoles.value);
-    
+   
     // --- 2. Check if Page is Public ---
     // If the API returns no roles, the page is not protected, so we allow access.
     if (!requiredRoles.value || requiredRoles.value.length === 0) {
