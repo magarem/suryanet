@@ -78,7 +78,7 @@
                             id="item.amount"
                             v-model="item.amount"
                             v-bind="config"
-                            style="background-color: #272729"
+                            style="background-color: #0c0c0d"
                             class="p-inputtext p-component w-full"
                         />
                     </div>
