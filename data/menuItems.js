@@ -4,7 +4,7 @@ const menuItems = [
     section: 'Menu'
   },
   {
-    title: 'contacts',
+    title: 'Contatos',
     icon: 'icon-menu-contacts',
     path: '/contacts'
   },
