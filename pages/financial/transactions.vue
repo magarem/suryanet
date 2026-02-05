@@ -23,11 +23,9 @@
             :modal="true"
         >
             <form @submit.prevent="saveItem">
-                <!-- Adicione esta linha -->
                 <div class="grid grid-cols-3 gap-4">
                     <div class="mb-1">
                         <label for="item.date" class="block font-bold mb-1"> Data </label>
-                        <!-- Campo de data -->
                         <DatePicker id="item.date" v-model="item.date" dateFormat="dd/mm/yy" :locale="brLocale" showIcon class="w-full" :utc="true" />
                     </div>
 
@@ -51,7 +49,6 @@
                     </div>
                     <div class="col-span-3 mb-1">
                         <label for="item.category" class="block font-bold mb-2"> Categoria </label>
-                        <!-- <TreeSelect v-model="item.category_id" filter filterMode="lenient" :options="categoryTree" selectionMode="single" display="chip" :maxSelectedLabels="1" placeholder="Selecione" class="md:w-80 w-full" /> -->
                         <AutoComplete
                             id="item.category_id"
                             :disabled="!flag_categorias_select_active"
@@ -105,12 +102,10 @@
                             :suggestions="filteredItems_related_id"
                             @complete="searchItems_related_id($event)"
                             field="value"
-                            placeholder="Buscar um item"
+                            placeholder="Buscar ou digitar novo"
                             dropdown
-                            forceSelection
                             :dropdownMode="'current'"
                             optionLabel="value"
-                            optionValue="key"
                             class="w-full"
                             :inputClass="'w-full'"
                         ></AutoComplete>
@@ -133,21 +128,20 @@
 <script setup>
     import CustomDataTable from '~/components/CustomDataTable.vue';
 
-    import { ref, onMounted, computed } from 'vue';
+    import { ref, onMounted, computed, watch } from 'vue';
     import { useRoute } from 'vue-router';
     import { useToast } from 'primevue/usetoast';
     import { FilterMatchMode } from '@primevue/core/api';
     import InputText from 'primevue/inputtext';
-    import Calendar from 'primevue/calendar';
+    // import Calendar from 'primevue/calendar'; // Se não estiver usando, pode remover
     import CustomSelect from '~/components/CustomSelect.vue';
-    import { parseISO, format, parse } from 'date-fns';
+    import { parseISO, format } from 'date-fns';
     import { executeQuery, executeQueryRun, formatCurrency } from '@/utils/db';
 
     const toast = useToast();
     const route = useRoute();
 
     const filteredItems = ref([]);
-    const dt = ref();
     const items = ref([]);
     const item = ref({});
     const itemDialog = ref(false);
@@ -168,12 +162,8 @@
     const categoryOptions = ref([]);
     const contactsOptions = ref([]);
 
-    const { user, clear: clearSession } = useUserSession();
+    const { user } = useUserSession();
 
-    const _selectedItems = (items) => {
-        alert(items);
-        selectedItems.value = items;
-    };
     const searchItems = (event) => {
         setTimeout(() => {
             if (!event.query.trim().length) {
@@ -199,9 +189,10 @@
     };
 
     function formatDateBR(isoString) {
+        if(!isoString) return "";
         const date = new Date(isoString);
         const day = String(date.getUTCDate()).padStart(2, '0');
-        const month = String(date.getUTCMonth() + 1).padStart(2, '0'); // Months are 0-based
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
         const year = date.getUTCFullYear();
         return `${day}-${month}-${year}`;
     }
@@ -222,7 +213,6 @@
         focusOnRight: false,
     };
 
-    // Localização em português do Brasil
     const brLocale = {
         firstDayOfWeek: 0,
         dayNames: ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'],
@@ -283,24 +273,26 @@
             editTemplate: InputText,
             hidden: true,
         },
+        // --- COLUNAS DE CONTATO AJUSTADAS ---
         {
-            field: 'related_id',
-            header: 'Contato',
+            field: 'related_id', // ID usado na edição
+            header: 'Contato (ID)',
             sortable: true,
             style: { 'min-width': '15rem', 'background-color': '#111829' },
             editTemplate: 'Select',
             options: contactsOptions,
-            hidden: true,
+            hidden: true, // Oculto na grid, usado no form
         },
         {
-            field: 'contact_name',
+            field: 'contact_name', // Nome usado na visualização
             header: 'Contato',
             sortable: true,
             style: { 'min-width': '10rem', 'background-color': '#111829' },
             editTemplate: InputText,
             hide_editForm: true,
-            hidden: true,
+            hidden: false, // VISÍVEL NA GRID
         },
+        // -------------------------------------
         {
             field: 'payment_method',
             header: 'Pagamento',
@@ -333,88 +325,61 @@
     });
 
     const fetchData = async (newVal) => {
-        //Get lançamentos
         const data = await executeQuery(
             ` WITH RECURSIVE category_path AS (
-      SELECT id, parent_id, name, type, name AS full_path
-      FROM financial_categories
-      WHERE parent_id IS NULL 
-
-      UNION ALL
-
-      SELECT fc.id, fc.parent_id, fc.name, fc.type, cp.full_path || ' › ' || fc.name
-      FROM financial_categories fc
-      JOIN category_path cp ON fc.parent_id = cp.id
-    )
-    SELECT
-      ft.id,
-      ft.amount,
-      ft.doc,
-      ft.description,
-      ft.type,
-      ft.payment_method,
-      ft.obs,
-      ft.date,
-      fc.id AS category_id,
-      cp.full_path AS category,
-      u.name AS user,
-      c.id AS related_id,
-      c.name AS contact_name
-    FROM financial_transactions ft
-    LEFT JOIN financial_categories fc ON ft.category_id = fc.id
-    LEFT JOIN category_path cp ON fc.id = cp.id
-    LEFT JOIN users u ON ft.created_by = u.id
-    LEFT JOIN contacts c ON ft.related_id = c.id
-    ORDER BY ft.date DESC;`,
+                SELECT id, parent_id, name, type, name AS full_path
+                FROM financial_categories
+                WHERE parent_id IS NULL 
+                UNION ALL
+                SELECT fc.id, fc.parent_id, fc.name, fc.type, cp.full_path || ' › ' || fc.name
+                FROM financial_categories fc
+                JOIN category_path cp ON fc.parent_id = cp.id
+            )
+            SELECT
+                ft.id,
+                ft.amount,
+                ft.doc,
+                ft.description,
+                ft.type,
+                ft.payment_method,
+                ft.obs,
+                ft.date,
+                fc.id AS category_id,
+                cp.full_path AS category,
+                u.name AS user,
+                c.id AS related_id,
+                c.name AS contact_name
+            FROM financial_transactions ft
+            LEFT JOIN financial_categories fc ON ft.category_id = fc.id
+            LEFT JOIN category_path cp ON fc.id = cp.id
+            LEFT JOIN users u ON ft.created_by = u.id
+            LEFT JOIN contacts c ON ft.related_id = c.id
+            ORDER BY ft.date DESC;`
         );
         items.value = data;
 
-        // Get categorias ( recursivamente )
         const categorias = await executeQuery(
             ` WITH RECURSIVE category_tree AS (
-      SELECT 
-        id,
-        parent_id,
-        name,
-        type,
-        node_type,
-        name AS full_path
-      FROM financial_categories
-      WHERE parent_id IS NULL
-
-      UNION ALL
-
-      SELECT 
-        fc.id,
-        fc.parent_id,
-        fc.name,
-        fc.type,
-        fc.node_type,
-        ct.full_path || ' › ' || fc.name
-      FROM financial_categories fc
-      JOIN category_tree ct ON fc.parent_id = ct.id
-    )
-    SELECT 
-      id AS key, 
-      full_path AS value
-    FROM category_tree
-    WHERE 
-    (node_type is null or 
-      node_type != 'grupo')
-      ${newVal ? `AND type = '${newVal}'` : ''}
-    ORDER BY full_path;
-  `,
+                SELECT id, parent_id, name, type, node_type, name AS full_path
+                FROM financial_categories WHERE parent_id IS NULL
+                UNION ALL
+                SELECT fc.id, fc.parent_id, fc.name, fc.type, fc.node_type, ct.full_path || ' › ' || fc.name
+                FROM financial_categories fc JOIN category_tree ct ON fc.parent_id = ct.id
+            )
+            SELECT id AS key, full_path AS value
+            FROM category_tree
+            WHERE (node_type is null or node_type != 'grupo')
+            ${newVal ? `AND type = '${newVal}'` : ''}
+            ORDER BY full_path;`
         );
         categoryOptions.value = [{ key: null, value: '---' }, ...categorias];
 
-        // Get contatos
         const contacts = await executeQuery(`SELECT * FROM contacts`);
         contactsOptions.value = contacts.map((cat) => ({
             value: cat.name,
             key: cat.id,
         }));
 
-        //Get payment methods
         const sql_payment_method_ops = await executeQuery(`SELECT * FROM financial_payment_methods`);
         payment_method_ops.value = sql_payment_method_ops.map((cat) => ({
             value: cat.name,
@@ -439,34 +404,66 @@
     async function saveItem() {
         submitted.value = true;
         editSaveButtonPressed.value = true;
-        let isValid = true;
-        // for (const col of columns.value) {
-        //   if (col.editTemplate && !item.value[col.field]) {
-        //     isValid = false;
-        //     break;
-        //   }
-        // }
 
-        // if (!isValid) return;
-        console.log('item.value', item.value);
+        let finalRelatedId = null;
+
+        // --- LÓGICA DE CONTATO (TEXTO LIVRE OU SELEÇÃO) ---
+        if (item.value.related_id) {
+            // Caso 1: Usuário selecionou da lista (é um Objeto)
+            if (typeof item.value.related_id === 'object' && item.value.related_id.key) {
+                finalRelatedId = item.value.related_id.key;
+            } 
+            // Caso 2: Usuário digitou nome novo (é uma String)
+            else if (typeof item.value.related_id === 'string') {
+                const newName = item.value.related_id.trim();
+                if (newName) {
+                    try {
+                        const createContactResult = await $fetch(`/api/upsert`, {
+                            method: 'POST',
+                            body: {
+                                table: 'contacts',
+                                data: { name: newName }, 
+                                condition: null,
+                            },
+                        });
+
+                        console.log("Resultado da criação do contato:", createContactResult);
+                        // Tenta recuperar o ID. Ajuste conforme retorno da sua API.
+                        // Assumindo que retorna algo como { id: 123 } ou { data: { id: 123 } }
+                        if (createContactResult && !createContactResult.error) {
+                            finalRelatedId = createContactResult.result.lastInsertRowid;
+                            
+                            // Fallback: Se a API não retorna ID, precisaria fazer um SELECT aqui.
+                            // Mas se ela retorna, adicionamos na lista local para melhorar a UX
+                            if(finalRelatedId) {
+                                contactsOptions.value.push({ key: finalRelatedId, value: newName });
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Erro ao criar contato:", e);
+                    }
+                }
+            }
+        }
+        // ---------------------------------------------------
 
         const dataToSave = {
             ...item.value,
             amount: item.value.type == 'saída' ? -Math.abs(Number(item.value.amount)) : Math.abs(Number(item.value.amount)),
             date: item.value.date ? format(item.value.date, 'yyyy-MM-dd') : null,
-
             created_by: user.value.id,
             category_id: item.value.category_id?.key,
-            related_id: item.value.related_id?.key,
+            related_id: finalRelatedId, // ID processado
         };
 
+        // Limpeza
         delete dataToSave.category;
         delete dataToSave.contact;
         delete dataToSave.user;
         delete dataToSave.contact_name;
-
-        console.log('item.value>>>', item.value);
-        console.log('dataToSave>>>', dataToSave);
+        
+        // Garante que não envia objeto no related_id se algo falhar
+        if (typeof dataToSave.related_id === 'object') delete dataToSave.related_id;
 
         const isNew = !dataToSave.id;
 
@@ -480,44 +477,57 @@
         });
 
         if (result?.error) {
-            toast.add({
-                severity: 'error',
-                summary: 'Erro',
-                detail: 'Falha ao salvar',
-                life: 3000,
-            });
+            toast.add({ severity: 'error', summary: 'Erro', detail: 'Falha ao salvar', life: 3000 });
+            editSaveButtonPressed.value = false;
         } else {
             editSaveButtonPressed.value = false;
-            toast.add({
-                severity: 'success',
-                summary: 'Sucesso',
-                detail: isNew ? 'Criado' : 'Atualizado',
-                life: 3000,
-            });
+            toast.add({ severity: 'success', summary: 'Sucesso', detail: isNew ? 'Criado' : 'Atualizado', life: 3000 });
 
-            // itemDialog.value = false;
             const aux_type = item.value.type;
             item.value = {};
             item.value.date = new Date();
             item.value.type = aux_type;
-            console.log('>>>>', op);
 
             if (flg_isEdit.value) {
                 flg_isEdit.value = false;
                 itemDialog.value = false;
             }
+            // Recarrega os dados (trazendo o contact_name atualizado na grid)
             await fetchData(aux_type);
         }
     }
 
-    async function editItem(row) {
+   async function editItem(row) {
         flg_isEdit.value = true;
+        
+        // Copia os dados da linha
         item.value = { ...row };
+        
+        // Categoria
         item.value.category_id = categoryOptions.value.find((x) => x.key === row.category_id);
-        item.value.related_id = contactsOptions.value.find((x) => x.key === row.related_id);
-        item.value.date = parseISO(`${item.value.date.split('T')[0]}T00:00:00`);
+        
+        // --- CORREÇÃO AQUI ---
+        // 1. Tenta achar na lista de opções (usando '==' para ignorar diferença de string/number)
+        let foundContact = contactsOptions.value.find((x) => x.key == row.related_id);
 
-        if (item.value.category_id) itemDialog.value = true;
+        // 2. Se não achou na lista, mas a linha tem ID e Nome (garante que apareça visualmente)
+        if (!foundContact && row.related_id && row.contact_name) {
+            foundContact = { key: row.related_id, value: row.contact_name };
+            
+            // Opcional: Adiciona na lista de opções para que buscas futuras funcionem
+            contactsOptions.value.push(foundContact);
+        }
+
+        item.value.related_id = foundContact;
+        // ---------------------
+        
+        // Ajuste da data
+        if(item.value.date) {
+             // Garante compatibilidade de timezone cortando a string
+             item.value.date = parseISO(`${String(item.value.date).split('T')[0]}T00:00:00`);
+        }
+       
+        itemDialog.value = true; 
     }
 
     function confirmDeleteItem(row) {
@@ -544,17 +554,12 @@
         const response = await $fetch(`/api/delete`, {
             method: 'POST',
             body: {
-                table: 'financial_transactions', // Substitua pelo nome da sua tabela
+                table: 'financial_transactions',
                 condition: `id in (${selectedItems.value.map((item) => item.id).join(',')})`,
             },
         });
         selectedItems.value = null;
-        toast.add({
-            severity: 'success',
-            summary: 'Successful',
-            detail: 'Items Deleted',
-            life: 3000,
-        });
+        toast.add({ severity: 'success', summary: 'Successful', detail: 'Items Deleted', life: 3000 });
     }
 
     onMounted(async () => {
@@ -564,7 +569,6 @@
     watch(
         () => item.value.type,
         (newVal) => {
-            // alert(items.value.type)
             flag_categorias_select_active.value = true;
             fetchData(newVal);
         },
